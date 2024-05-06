@@ -98,6 +98,8 @@ private:
 
 	std::vector<VkImageView> swapChainImageViews;	// 자동 clean up X
 
+	VkPipelineLayout pipelineLayout;	// for uniform values. 자동 clean up X
+
 	void initWindow() {
 		glfwInit();
 
@@ -156,6 +158,102 @@ private:
 		fragShaderStageInfo.pName = "main";
 
 		VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+		// [FIXED] Vertex Input
+		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};	// 지금은 vertex shader에 하드 코딩해놔서 딱히 정보 없음.
+		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		vertexInputInfo.vertexBindingDescriptionCount = 0;
+		vertexInputInfo.pVertexBindingDescriptions = nullptr;
+		vertexInputInfo.vertexAttributeDescriptionCount = 0;
+		vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+
+		// [FIXED] Input Assembly
+		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+		// [FIXED] Viewport & Scissor rectangle
+		VkPipelineViewportStateCreateInfo viewportState{};
+		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.viewportCount = 1;
+		viewportState.scissorCount = 1;
+
+		// [FIXED] Rasterizer
+		VkPipelineRasterizationStateCreateInfo rasterizer{};
+		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.depthClampEnable = VK_FALSE;
+
+		rasterizer.rasterizerDiscardEnable = VK_FALSE;
+
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+
+		rasterizer.lineWidth = 1.0f;
+
+		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;	// face culling
+		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;	// 앞면의 vertex order 결정
+
+		rasterizer.depthBiasEnable = VK_FALSE;	// depth value 바꾸기인데, disable.
+		rasterizer.depthBiasConstantFactor = 0.0f;
+		rasterizer.depthBiasClamp = 0.0f;
+		rasterizer.depthBiasSlopeFactor = 0.0f;
+
+		// [FIXED] Multisampling
+		VkPipelineMultisampleStateCreateInfo multisampling{};
+		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.sampleShadingEnable = VK_FALSE;
+		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+		multisampling.minSampleShading = 1.0f;	// Optional
+		multisampling.pSampleMask = nullptr;	// Optional
+		multisampling.alphaToCoverageEnable = VK_FALSE;	//Optional
+		multisampling.alphaToOneEnable = VK_FALSE;	// Optional
+
+		// [FIXED] Color Blending
+		VkPipelineColorBlendAttachmentState colorBlendAttachment{};	// per framebuffer
+		colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+			| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		colorBlendAttachment.blendEnable = VK_FALSE;	// now using one framebuffer, src(new)가 최종 색깔로.
+
+		colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;		// Optional
+		colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;	// Optional
+		colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;				// Optional
+		colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;		// Optional
+		colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;	// Optional
+		colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;				// Optional
+
+		VkPipelineColorBlendStateCreateInfo colorBlending{};	// for all framebuffers
+		colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlending.logicOpEnable = VK_FALSE;	// for bitwise combination blending
+		colorBlending.logicOp = VK_LOGIC_OP_COPY;	// Optional
+		colorBlending.attachmentCount = 1;
+		colorBlending.pAttachments = &colorBlendAttachment;
+		colorBlending.blendConstants[0] = 0.0f;		// Optional
+		colorBlending.blendConstants[1] = 0.0f;		// Optional
+		colorBlending.blendConstants[2] = 0.0f;		// Optional
+		colorBlending.blendConstants[3] = 0.0f;		// Optional
+
+		// [FIXED] Dynamic State
+		std::vector<VkDynamicState> dynamicStates = {
+			VK_DYNAMIC_STATE_VIEWPORT,
+			VK_DYNAMIC_STATE_SCISSOR
+		};
+
+		VkPipelineDynamicStateCreateInfo dynamicState{};
+		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+		dynamicState.pDynamicStates = dynamicStates.data();
+		
+		// [FIXED] Pipeline Layout(Uniform values)
+		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		pipelineLayoutInfo.setLayoutCount = 0;				// Optional
+		pipelineLayoutInfo.pSetLayouts = nullptr;			// Optional
+		pipelineLayoutInfo.pushConstantRangeCount = 0;		// Optional
+		pipelineLayoutInfo.pPushConstantRanges = nullptr;	// Optional
+
+		if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create pipeline layout!");
+		}
 
 		vkDestroyShaderModule(device, fragShaderModule, nullptr);
 		vkDestroyShaderModule(device, vertShaderModule, nullptr);
@@ -651,6 +749,8 @@ private:
 	}
 
 	void cleanup() {
+		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+
 		for (auto imageView : swapChainImageViews) {
 			vkDestroyImageView(device, imageView, nullptr);
 		}
