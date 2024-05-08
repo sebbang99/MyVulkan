@@ -101,6 +101,8 @@ private:
 	VkRenderPass renderPass;	// 자동 clean up X
 	VkPipelineLayout pipelineLayout;	// for uniform values. 자동 clean up X
 
+	VkPipeline graphicsPipeline;
+
 	void initWindow() {
 		glfwInit();
 
@@ -144,7 +146,7 @@ private:
 		colorAttachmentRef.attachment = 0;	// index = 0
 		colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		// Subpass 
+		// Sub pass 
 		VkSubpassDescription subpass{};
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;	// between graphic subpass and compute subpass
 
@@ -296,6 +298,36 @@ private:
 
 		if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create pipeline layout!");
+		}
+
+		// Graphics pipeline - shaders
+		VkGraphicsPipelineCreateInfo pipelineInfo{};
+		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		pipelineInfo.stageCount = 2;	// VS, FS
+		pipelineInfo.pStages = shaderStages;
+		
+		// Graphics pipeline - fixed functions
+		pipelineInfo.pVertexInputState = &vertexInputInfo;
+		pipelineInfo.pInputAssemblyState = &inputAssembly;
+		pipelineInfo.pViewportState = &viewportState;
+		pipelineInfo.pRasterizationState = &rasterizer;
+		pipelineInfo.pMultisampleState = &multisampling;
+		pipelineInfo.pDepthStencilState = nullptr;	// Optional
+		pipelineInfo.pColorBlendState = &colorBlending;
+		pipelineInfo.pDynamicState = &dynamicState;
+
+		pipelineInfo.layout = pipelineLayout;
+
+		pipelineInfo.renderPass = renderPass;
+		pipelineInfo.subpass = 0;	// index of sub pass of graphics pipeline
+
+		// Create a new pipeline by deriving from an existing pipeline.
+		//pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;	// Optional
+		//pipelineInfo.basePipelineIndex = -1;	// Optional
+
+		// Graphics pipeline
+		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create graphics pipeline!");
 		}
 
 		vkDestroyShaderModule(device, fragShaderModule, nullptr);
@@ -792,6 +824,7 @@ private:
 	}
 
 	void cleanup() {
+		vkDestroyPipeline(device, graphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 		vkDestroyRenderPass(device, renderPass, nullptr);
 
