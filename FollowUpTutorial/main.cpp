@@ -105,6 +105,10 @@ private:
 	VkCommandPool commandPool;	// 자동 clean up X
 	VkCommandBuffer commandBuffer;	// command pool이 destroy될 때 자동으로 clean up 됨.
 
+	VkSemaphore imageAvailableSemaphore;	// swapchain에서 img를 얻었으니 rendering이 가능하다.
+	VkSemaphore renderFinishedSemaphore;	// rendering이 끝났으니 presentation이 가능하다.
+	VkFence inFlightFence;					// 한번에 한 frame씩 렌더링하기 위해
+
 	void initWindow() {
 		glfwInit();
 
@@ -128,6 +132,23 @@ private:
 		createFramebuffers();
 		createCommandPool();
 		createCommandBuffer();
+		createSyncObjects();
+	}
+
+	void createSyncObjects() {
+		VkSemaphoreCreateInfo semaphoreInfo{};
+		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+		VkFenceCreateInfo fenceInfo{};
+		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+		if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS
+			|| vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS
+			|| vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+
+			throw std::runtime_error("failed to create semaphores!");
+		}
 	}
 
 	void createCommandBuffer() {
@@ -257,6 +278,16 @@ private:
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorAttachmentRef;	// FS의 "layout(location = 0) out vec4 outColor"에서 직접 참조
 
+		// Subpass dependencies
+		VkSubpassDependency dependency{};
+		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;	// implicit subpass before or after render pass
+		dependency.dstSubpass = 0;	// my only 1 subpass
+
+		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;	// "여기서 기다려라"
+		dependency.srcAccessMask = 0;
+		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;	// "이거 수행하고 싶으면"
+		dependency.dstStageMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
 		// Render pass
 		VkRenderPassCreateInfo renderPassInfo{};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -264,6 +295,8 @@ private:
 		renderPassInfo.pAttachments = &colorAttachment;
 		renderPassInfo.subpassCount = 1;
 		renderPassInfo.pSubpasses = &subpass;
+		renderPassInfo.dependencyCount = 1;
+		renderPassInfo.pDependencies = &dependency;
 
 		if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create render pass!");
@@ -924,10 +957,61 @@ private:
 	void mainLoop() {	// iterate until window is closed.
 		while (!glfwWindowShouldClose(window)) {
 			glfwPollEvents();
+			drawFrame();
 		}
 	}
 
+	void drawFrame() {
+		vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+		vkResetFences(device, 1, &inFlightFence);
+
+		uint32_t imageIndex;
+		vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+		vkResetCommandBuffer(commandBuffer, 0);
+		recordCommandBuffer(commandBuffer, imageIndex);
+
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+		VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };	// 기다릴 semaphore	
+		VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };	// 기다릴 stage 위치
+		submitInfo.waitSemaphoreCount = 1;
+		submitInfo.pWaitSemaphores = waitSemaphores;
+		submitInfo.pWaitDstStageMask = waitStages;
+
+		submitInfo.commandBufferCount = 1;	// 제출할 cmd buffer
+		submitInfo.pCommandBuffers = &commandBuffer;
+
+		VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };	// 실행 끝나면 signal할 semaphore
+		submitInfo.signalSemaphoreCount = 1;
+		submitInfo.pSignalSemaphores = signalSemaphores;
+
+		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS) {
+			throw std::runtime_error("failed to submit draw command buffer!");
+		}
+
+		VkPresentInfoKHR presentInfo{};
+		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+		presentInfo.waitSemaphoreCount = 1;
+		presentInfo.pWaitSemaphores = signalSemaphores;
+
+		VkSwapchainKHR swapChains[] = { swapChain };
+		presentInfo.swapchainCount = 1;
+		presentInfo.pSwapchains = swapChains;
+		presentInfo.pImageIndices = &imageIndex;
+
+		presentInfo.pResults = nullptr;	// Optional
+
+		vkQueuePresentKHR(presentQueue, &presentInfo);
+	}
+
 	void cleanup() {
+		vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+		vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
+		vkDestroyFence(device, inFlightFence, nullptr);
+
 		vkDestroyCommandPool(device, commandPool, nullptr);
 
 		for (auto framebuffer : swapChainFramebuffers) {
