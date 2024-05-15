@@ -17,6 +17,7 @@
 
 const uint32_t WIDTH = 987;
 const uint32_t HEIGHT = 654;
+const int MAX_FRAMES_IN_FLIGHT = 2;
 
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
@@ -103,11 +104,13 @@ private:
 	VkPipeline graphicsPipeline;
 
 	VkCommandPool commandPool;	// 자동 clean up X
-	VkCommandBuffer commandBuffer;	// command pool이 destroy될 때 자동으로 clean up 됨.
+	std::vector<VkCommandBuffer> commandBuffers;	// command pool이 destroy될 때 자동으로 clean up 됨.
 
-	VkSemaphore imageAvailableSemaphore;	// swapchain에서 img를 얻었으니 rendering이 가능하다.
-	VkSemaphore renderFinishedSemaphore;	// rendering이 끝났으니 presentation이 가능하다.
-	VkFence inFlightFence;					// 한번에 한 frame씩 렌더링하기 위해
+	std::vector<VkSemaphore> imageAvailableSemaphores;	// swapchain에서 img를 얻었으니 rendering이 가능하다.
+	std::vector<VkSemaphore> renderFinishedSemaphores;	// rendering이 끝났으니 presentation이 가능하다.
+	std::vector<VkFence> inFlightFences;					// 한번에 한 frame씩 렌더링하기 위해
+
+	uint32_t currentFrame = 0;
 
 	void initWindow() {
 		glfwInit();
@@ -615,30 +618,40 @@ private:
 	}
 
 	void createCommandBuffer() {
+		commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
 		VkCommandBufferAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		allocInfo.commandPool = commandPool;
 		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandBufferCount = 1;
+		allocInfo.commandBufferCount = (uint32_t)commandBuffers.size();
 
-		if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
+		// cmd pool에서 cmd buffer를 할당해주는 함수.
+		// 할당한 cmd buffer objects는 3번째 인자로 리턴된다.
+		if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS) {
 			throw std::runtime_error("failed to allocate command buffers!");
 		}
 	}
 
 	void createSyncObjects() {
+		imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
 		VkSemaphoreCreateInfo semaphoreInfo{};
 		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
 		VkFenceCreateInfo fenceInfo{};
 		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;	// inFlightFences가 signaled로 시작해서, vkWaitForFences()가 첫번째 호출시 즉시 리턴.
 
-		if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS
-			|| vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS
-			|| vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS
+				|| vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS
+				|| vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
 
-			throw std::runtime_error("failed to create semaphores!");
+				throw std::runtime_error("failed to create semaphores!");
+			}
 		}
 	}
 
@@ -959,32 +972,35 @@ private:
 	}
 
 	void drawFrame() {
-		vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
-		vkResetFences(device, 1, &inFlightFence);
+		vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);	// 첫번째 호출시 즉시 리턴.
+		vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
 		uint32_t imageIndex;
-		vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+		vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+		// swap chain으로부터 렌더링할 image의 인덱스 습득.
+		// 세마포어는 image가 렌더링될 준비가 끝나면 signal된다.
+		// 첫번째 frame에 대해서는 세마포어가 필요없을 수 있지만, 준비가 완료되었는지 확인하는 측면에서 사용하는 것이 좋다.
 
-		vkResetCommandBuffer(commandBuffer, 0);
-		recordCommandBuffer(commandBuffer, imageIndex);
+		vkResetCommandBuffer(commandBuffers[currentFrame], 0);
+		recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
 		VkSubmitInfo submitInfo{};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-		VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };	// 기다릴 semaphore	
+		VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame]};	// 기다릴 semaphore	
 		VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };	// 기다릴 stage 위치
 		submitInfo.waitSemaphoreCount = 1;
 		submitInfo.pWaitSemaphores = waitSemaphores;
 		submitInfo.pWaitDstStageMask = waitStages;
 
 		submitInfo.commandBufferCount = 1;	// 제출할 cmd buffer
-		submitInfo.pCommandBuffers = &commandBuffer;
+		submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
 
-		VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };	// 실행 끝나면 signal할 semaphore
+		VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame]};	// 실행 끝나면 signal할 semaphore
 		submitInfo.signalSemaphoreCount = 1;
 		submitInfo.pSignalSemaphores = signalSemaphores;
 
-		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS) {
+		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
 			throw std::runtime_error("failed to submit draw command buffer!");
 		}
 
@@ -1002,6 +1018,8 @@ private:
 		presentInfo.pResults = nullptr;	// Optional
 
 		vkQueuePresentKHR(presentQueue, &presentInfo);
+
+		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
 	void mainLoop() {	// iterate until window is closed.
@@ -1014,9 +1032,11 @@ private:
 	}
 
 	void cleanup() {
-		vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
-		vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
-		vkDestroyFence(device, inFlightFence, nullptr);
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+			vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+			vkDestroyFence(device, inFlightFences[i], nullptr);
+		}
 
 		vkDestroyCommandPool(device, commandPool, nullptr);
 
