@@ -116,7 +116,7 @@ private:
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);	// OpenGL이 기본이라서 OpenGL 아니라고 명시.
 		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-		window = glfwCreateWindow(WIDTH, HEIGHT, "Sehee's Vulkan(987 x 654)", nullptr, nullptr);	// 5th : OpenGL에서만 쌉가능.
+		window = glfwCreateWindow(WIDTH, HEIGHT, "Sehee's Vulkan", nullptr, nullptr);	// 5th : OpenGL에서만 쌉가능.
 	}
 
 	void initVulkan() {
@@ -931,7 +931,7 @@ private:
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 		void* pUserData) {
 
-		std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
+		std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl << std::endl;
 
 		return VK_FALSE;
 	}
@@ -959,6 +959,8 @@ private:
 			glfwPollEvents();
 			drawFrame();
 		}
+
+		vkDeviceWaitIdle(device);
 	}
 
 	void drawFrame() {
