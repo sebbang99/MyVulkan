@@ -17,6 +17,10 @@
 #include <glm/glm.hpp>	// for Vertex data
 #include <array>		// for Vertex data
 
+#define GLM_FORCE_RADIANS					// for Uniform data
+#include <glm/gtc/matrix_transform.hpp>		// for Uniform data
+#include <chrono>							// for Uniform data (time keeping)
+
 const uint32_t WIDTH = 987;
 const uint32_t HEIGHT = 654;
 const int MAX_FRAMES_IN_FLIGHT = 2;
@@ -101,6 +105,12 @@ struct Vertex {
 	}
 };
 
+struct UniformBufferObject {
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 proj;
+};
+
 const std::vector<Vertex> vertices = {
 	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},	// red
 	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},	// green
@@ -142,7 +152,10 @@ private:
 	std::vector<VkFramebuffer> swapChainFramebuffers;
 
 	VkRenderPass renderPass;	// 자동 clean up X
+
+	VkDescriptorSetLayout descriptorSetLayout;
 	VkPipelineLayout pipelineLayout;	// for uniform values. 자동 clean up X
+	
 	VkPipeline graphicsPipeline;
 
 	VkCommandPool commandPool;	// 자동 clean up X
@@ -158,6 +171,10 @@ private:
 	VkDeviceMemory vertexBufferMemory;
 	VkBuffer indexBuffer;
 	VkDeviceMemory indexBufferMemory;
+
+	std::vector<VkBuffer> uniformBuffers;
+	std::vector<VkDeviceMemory> uniformBuffersMemory;
+	std::vector<void*> uniformBuffersMapped;
 
 	uint32_t currentFrame = 0;
 
@@ -187,11 +204,13 @@ private:
 		createSwapChain();	
 		createImageViews();	
 		createRenderPass();	
+		createDescriptorSetLayout();
 		createGraphicsPipeline();	
 		createFramebuffers();	
 		createCommandPool();	
 		createVertexBuffer();
 		createIndexBuffer();
+		createUniformBuffers();
 		createCommandBuffer();	
 		createSyncObjects();	
 	}
@@ -486,6 +505,24 @@ private:
 		}
 	}
 
+	void createDescriptorSetLayout() {
+		VkDescriptorSetLayoutBinding uboLayoutBinding{};
+		uboLayoutBinding.binding = 0;
+		uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		uboLayoutBinding.descriptorCount = 1;
+		uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		uboLayoutBinding.pImmutableSamplers = nullptr;
+		
+		VkDescriptorSetLayoutCreateInfo layoutInfo{};
+		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		layoutInfo.bindingCount = 1;
+		layoutInfo.pBindings = &uboLayoutBinding;
+
+		if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create descriptor set layout!");
+		}
+	}
+
 	void createGraphicsPipeline() {
 		auto vertShaderCode = readFile("shaders/vert.spv");
 		auto fragShaderCode = readFile("shaders/frag.spv");
@@ -600,8 +637,8 @@ private:
 		// [FIXED] Pipeline Layout(Uniform values)
 		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
 		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipelineLayoutInfo.setLayoutCount = 0;				// Optional
-		pipelineLayoutInfo.pSetLayouts = nullptr;			// Optional
+		pipelineLayoutInfo.setLayoutCount = 1;							// Optional
+		pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;			// Optional
 		pipelineLayoutInfo.pushConstantRangeCount = 0;		// Optional
 		pipelineLayoutInfo.pPushConstantRanges = nullptr;	// Optional
 
@@ -756,6 +793,21 @@ private:
 		vkQueueWaitIdle(graphicsQueue);	// CPU가 transfer 완료를 기다린다.
 
 		vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+	}
+
+	void createUniformBuffers() {
+		VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+		uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+		uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+		uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+				VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+
+			vkMapMemory(device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+		}
 	}
 
 	void createCommandBuffer() {
@@ -1207,6 +1259,8 @@ private:
 			throw std::runtime_error("failed to acquire swap chain image!");
 		}
 
+		updateUniformBuffer(currentFrame);
+
 		vkResetFences(device, 1, &inFlightFences[currentFrame]);	// Moved to prevent DEADLOCK
 
 		vkResetCommandBuffer(commandBuffers[currentFrame], 0);
@@ -1258,6 +1312,24 @@ private:
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
+	void updateUniformBuffer(uint32_t currentImage) {
+		static auto startTime = std::chrono::high_resolution_clock::now();	
+		// static 변수. 프로그램이 시작할 때 할당되고, 함수가 여러번 실행되어도 초기화는 1번만 수행된다.
+		// 함수 내부에서 선언하였으므로 이 함수 내에서만 사용 가능하다.
+
+		auto currentTime = std::chrono::high_resolution_clock::now();	
+		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+		UniformBufferObject ubo{};
+		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.view = glm::lookAt(glm::vec3(3.0f, 3.0f, 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));	// (eye position, center position, up axis)
+		ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);	// (vertical fov, aspect ratio, near, far)
+
+		ubo.proj[1][1] *= -1; // ★
+
+		memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+	}
+
 	void mainLoop() {	// iterate until window is closed.
 		while (!glfwWindowShouldClose(window)) {
 			glfwPollEvents();
@@ -1270,15 +1342,22 @@ private:
 	void cleanup() {
 		cleanupSwapChain();
 
+		vkDestroyPipeline(device, graphicsPipeline, nullptr);
+		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+		vkDestroyRenderPass(device, renderPass, nullptr);
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			vkDestroyBuffer(device, uniformBuffers[i], nullptr);
+			vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
+		}
+
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+
 		vkDestroyBuffer(device, indexBuffer, nullptr);
 		vkFreeMemory(device, indexBufferMemory, nullptr);
 
 		vkDestroyBuffer(device, vertexBuffer, nullptr);
 		vkFreeMemory(device, vertexBufferMemory, nullptr);
-
-		vkDestroyPipeline(device, graphicsPipeline, nullptr);
-		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-		vkDestroyRenderPass(device, renderPass, nullptr);
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
