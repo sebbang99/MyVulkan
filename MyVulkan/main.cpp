@@ -143,7 +143,7 @@ const std::vector<uint16_t> indices = {
 	4, 5, 6, 6, 7, 4
 };
 
-class HelloTriangleApplication {
+class RasterizationBasic {
 public:
 	void run() {
 		initWindow();
@@ -224,7 +224,7 @@ private:
 	}
 
 	static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
-		auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+		auto app = reinterpret_cast<RasterizationBasic*>(glfwGetWindowUserPointer(window));
 		app->framebufferResized = true;
 	}
 
@@ -1774,7 +1774,7 @@ private:
 };
 
 int main() {
-	HelloTriangleApplication app;
+	RasterizationBasic app;
 
 	try {
 		app.run();
