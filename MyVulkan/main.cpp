@@ -38,7 +38,10 @@ const std::vector<const char*> validationLayers = {
 };
 
 const std::vector<const char*> deviceExtensions = {
-	VK_KHR_SWAPCHAIN_EXTENSION_NAME
+	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+	VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,	// to build AS
+	VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,		// to use vkCmdTraceRaysKHR
+	VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME	// required by RT pipeline
 };
 
 #ifdef NDEBUG
@@ -268,14 +271,14 @@ private:
 		appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0); // (major, minor, patch)
 		appInfo.pEngineName = "No Engine";
 		appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-		appInfo.apiVersion = VK_API_VERSION_1_0;
+		appInfo.apiVersion = VK_API_VERSION_1_3;
 
 		// Not optional, driver에게 global extension과 validation layer에 대해 전달.
 		VkInstanceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		createInfo.pApplicationInfo = &appInfo;
 
-		auto extensions = getRequiredExtensions();
+		auto extensions = getRequiredExtensions();	// glfw 관련
 		createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
 		createInfo.ppEnabledExtensionNames = extensions.data();
 
@@ -335,6 +338,7 @@ private:
 	void pickPhysicalDevice() {
 		uint32_t deviceCount = 0;
 		vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+		std::cout << "Physical Device 개수 : " << deviceCount << std::endl;	// 2 graphics cards
 
 		if (deviceCount == 0) {
 			throw std::runtime_error("failed to find GPUs with Vulkan support!");
@@ -1367,7 +1371,7 @@ private:
 	bool isDeviceSuitable(VkPhysicalDevice device) {
 		QueueFamilyIndices indices = findQueueFamilies(device);	// 그래픽 카드의 Queue Family 지원
 
-		bool extensionsSupported = checkDeviceExtensionSupport(device);	// 그래픽 카드의 swap chain 지원
+		bool extensionsSupported = checkDeviceExtensionSupport(device);
 
 		bool swapChainAdequate = false;
 		if (extensionsSupported) {
