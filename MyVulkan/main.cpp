@@ -146,7 +146,7 @@ const std::vector<uint16_t> indices = {
 	4, 5, 6, 6, 7, 4
 };
 
-class HelloTriangleApplication {
+class RaytracingBasic {
 public:
 	void run() {
 		initWindow();
@@ -227,7 +227,7 @@ private:
 	}
 
 	static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
-		auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+		auto app = reinterpret_cast<RaytracingBasic*>(glfwGetWindowUserPointer(window));
 		app->framebufferResized = true;
 	}
 
@@ -1778,7 +1778,7 @@ private:
 };
 
 int main() {
-	HelloTriangleApplication app;
+	RaytracingBasic app;
 
 	try {
 		app.run();
